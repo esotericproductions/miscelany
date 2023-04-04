@@ -1,0 +1,77 @@
+class VPStateMachine(private val requirements: Map<String, Set<String>>) {
+    private var currentState: String? = null
+
+    /**
+     * Processes a list of events and validates the state transitions based on the requirements map.
+     * Prints "OK" for each valid state transition, and prints an error
+     * for any invalid state transition.
+     * Reset the state machine to null after processing all events.
+     *
+     * @param events a list of events to process.
+     */
+    fun processEvents(events: List<String>) {
+        for (event in events) {
+            val nextState = getNextState(currentState, event)
+            if (nextState != null) {
+                println("OK")
+                currentState = nextState
+            } else {
+                println("Error: Invalid state transition")
+                currentState = null
+                break
+            }
+        }
+        currentState = null // Reset the state machine to the null state
+    }
+
+    /**
+     * returns the next state given the current state and an event, or null if the state transition is invalid.
+     *
+     * @param currState The current state.
+     * @param event The event.
+     * @return The next state, or null if the state transition is invalid.
+     */
+    private fun getNextState(currState: String?, event: String): String? {
+        if (currentState == null) { // Null state transition
+            if (event == "a") {
+                return "a"
+            } else {
+                return null
+            }
+        } else { // Non-null state transition
+            val validTransitions = requirements[currentState] // Get the set of valid next states
+            if (validTransitions != null && validTransitions.contains(event)) { // Check if the event is a valid next state
+                return when { // Handle any special cases (such as "d-e" or "e-e" transitions)
+                    currState == "d" && event == "e" -> "e"
+                    currState == "e" && event == "e" -> "e"
+                    else -> event
+                }
+            } else { // Invalid state transition
+                return null
+            }
+        }
+    }
+}
+
+// validation & failure cases.
+
+fun main() {
+    val requirements = mapOf(
+        "a" to setOf("a", "b"),
+        "b" to setOf("c"),
+        "c" to setOf("d"),
+        "d" to setOf("e"),
+        "e" to setOf("e")
+    )
+
+    val stateMachine = StateMachine(requirements)
+
+    // Valid state transition sequence
+    stateMachine.processEvents(listOf("a", "b", "c", "d", "e", "e"))
+
+    // Invalid state transition sequence
+    stateMachine.processEvents(listOf("a", "c", "d", "e", "a"))
+
+    // Valid state transition sequence followed by invalid state transition sequence
+    stateMachine.processEvents(listOf("a", "b", "c", "d", "e", "e", "a", "b", "c", "d", "e", "a"))
+}
