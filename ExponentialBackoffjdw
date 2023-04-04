@@ -1,0 +1,117 @@
+Exponential backoff is a technique that involves increasing the time between retries
+exponentially as the number of retries increases. This approach helps reduce
+the load on the server by spacing out the retries, rather than sending all requests
+at once. For example, if initial retry delay is 1 sec and
+backoff is 2, then the 2nd retry would be delayed by 2 seconds, the
+third by 4 seconds, the fourth by 8 seconds, etc. This gives the server
+time to recover from any overload or connectivity issues before being hit with
+another bunch of requests.
+
+"Jitter" is a technique that adds randomness to the retry interval to prevent all
+clients from retrying at the same time. Without jitter, all clients might retry
+at the same time, leading to another surge of requests hitting the server at the
+same time. Jitter adds a random factor to the retry delay, which spreads out the
+retry attempts over time, e.g. if the calculated retry delay is 5 seconds
+and the jitter factor is 0.2, then actual retry delay might be anywhere
+between 4 and 6 seconds, randomly. This helps to reduce the chances of
+all clients retrying at the same time.
+
+I'm using Ktor here instead of an alternative library like Retrofit or okhttp3.
+Ktor is a lightweight, Kotlin-first HTTP client and server framework that is designed
+to be easy to use and extend. It has built-in support for coroutine-based
+concurrency, JSON serialization, websockets, etc.
+
+Here's an example implementation:
+
+import io.ktor.client.HttpClient
+import io.ktor.client.features.HttpTimeout
+import io.ktor.client.features.Timeout
+import io.ktor.client.features.json.JsonFeature
+import io.ktor.client.features.logging.LogLevel
+import io.ktor.client.features.logging.Logging
+import io.ktor.client.features.logging.SIMPLE
+import io.ktor.client.features.websocket.WebSocketTimeoutException
+import io.ktor.client.request.post
+import io.ktor.client.statement.HttpResponse
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpMethod
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
+import kotlinx.coroutines.delay
+import java.util.concurrent.TimeUnit
+import kotlin.random.Random
+
+suspend fun sendMessageWithRetry(client: HttpClient, url: String, message: String) {
+    // Define initial backoff time and retry count
+    var backoffMillis = 500L
+    var retries = 0
+
+    // Define max retry attempts and max backoff time (in milliseconds)
+    val maxRetries = 5
+    val maxBackoffMillis = 10000L
+
+    // Define jitter range as a fraction of the backoff time
+    val jitterRange = 0.1
+
+    // Loop until message is sent or max retry attempts is reached
+    while (retries < maxRetries) {
+        try {
+            // Make HTTP POST request with message content
+            val response = client.post<HttpResponse>(url) {
+                contentType(ContentType.Application.Json)
+                body = TextContent(message, ContentType.Application.Json)
+                header(HttpHeaders.Connection, "Keep-Alive")
+            }
+
+            // Check if response was successful
+            if (response.status == HttpStatusCode.OK) {
+                println("Message sent successfully: $message")
+                return
+            } else {
+                println("Failed to send message: ${response.status}")
+            }
+        } catch (e: Exception) {
+            println("Failed to send message: ${e.message}")
+        }
+
+        // Increment retry count
+        retries++
+
+        // Calculate next backoff time using exponential backoff with jitter
+        val jitter = backoffMillis * jitterRange * Random.nextDouble(-1.0, 1.0)
+        val nextBackoffMillis = (backoffMillis + jitter).toLong()
+        backoffMillis = if (backoffMillis * 2 <= maxBackoffMillis) backoffMillis * 2 else maxBackoffMillis
+
+        // Wait for backoff time
+        delay(nextBackoffMillis)
+    }
+
+    // Retry attempts exhausted
+    println("Failed to send message after $retries retries: $message")
+}
+
+suspend fun main() {
+    // Create HTTP client with timeout and logging features
+    val client = HttpClient {
+        install(Timeout) {
+            requestTimeoutMillis = 5000L
+            socketTimeoutMillis = 5000L
+        }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 5000L
+            connectTimeoutMillis = 5000L
+            socketTimeoutMillis = 5000L
+        }
+        install(JsonFeature)
+        install(Logging) {
+            logger = Logger.DEFAULT
+            level = LogLevel.INFO
+        }
+    }
+
+    // Send sample messages with retry logic
+    val messages = listOf("{\"this\": \"is\"}", "{\"a\": \"test\"}")
+    for (message in messages) {
+        sendMessageWithRetry(client, "http://justtesting.test", message)
+    }
